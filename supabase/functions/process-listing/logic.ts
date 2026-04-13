@@ -1,4 +1,4 @@
-import { getDolarBlue, normalizeToUsd } from '../../src/lib/criptoya';
+import { getDolarBlue, normalizeToUsd } from '../../../src/lib/criptoya';
 
 export interface CarListing {
     source_url: string;
@@ -64,7 +64,7 @@ export async function processListing(listing: CarListing, db: any): Promise<Proc
     }
 
     // Calculate median (simplified here, in SQL we would use the function defined in schema.sql)
-    prices.sort((a, b) => a - b);
+    prices.sort((a: number, b: number) => a - b);
     const mid = Math.floor(prices.length / 2);
     const median = prices.length % 2 !== 0 ? prices[mid] : (prices[mid - 1] + prices[mid]) / 2;
 
