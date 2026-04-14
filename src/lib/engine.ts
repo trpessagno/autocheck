@@ -113,9 +113,17 @@ export async function runScraperCycle(config: {
         const processed = await processListing(raw, config.db);
         
         if (processed) {
-            const { error } = await config.db
+            let { error } = await config.db
                 .from('car_listings')
                 .upsert(processed, { onConflict: 'source_url' });
+
+            // Fail-safe for Supabase stuck schema cache
+            if (error && error.message.includes('schema cache') && processed.image_url) {
+                console.log('⚠️ Ignorando foto debido a caché de schema trabado en Supabase...');
+                delete processed.image_url;
+                const retry = await config.db.from('car_listings').upsert(processed, { onConflict: 'source_url' });
+                error = retry.error;
+            }
 
             if (error) {
                 console.error(`❌ Error grabando ${processed.title}:`, error);
