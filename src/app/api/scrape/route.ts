@@ -7,7 +7,7 @@ export async function POST(request: Request) {
         const body = await request.json();
         const { brand, model, year } = body;
 
-        await runScraperCycle({
+        const result = await runScraperCycle({
             parseBotKey: process.env.PARSE_BOT_API_KEY || '',
             telegramToken: process.env.TELEGRAM_BOT_TOKEN || '',
             telegramChatId: process.env.TELEGRAM_CHAT_ID || '',
@@ -15,7 +15,11 @@ export async function POST(request: Request) {
             targetQuery: { brand, model, year }
         });
 
-        return NextResponse.json({ success: true, message: 'Scraping cycle completed' });
+        if (result.count === 0) {
+            return NextResponse.json({ success: false, error: result.error || 'No se insertaron autos.' }, { status: 400 });
+        }
+
+        return NextResponse.json({ success: true, message: 'Scraping cycle completed', count: result.count });
     } catch (error: any) {
         console.error('Scraping Error:', error);
         return NextResponse.json({ success: false, error: error.message }, { status: 500 });

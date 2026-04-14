@@ -101,13 +101,14 @@ export async function runScraperCycle(config: {
 
     if (!rawListings || rawListings.length === 0) {
         console.log('⚠️ El scraper no encontró autos. Quizás un error de parseo o una búsqueda vacía.');
-        return;
+        return { count: 0, error: 'MercadoLibre bloqueó la petición o la estructura HTML cambió de nuevo. Revisa la terminal.' };
     }
 
     console.log(`📦 "Extracted" ${rawListings.length} listings nativamente. Procesando anomalías...`);
 
     // Procesamos y guardamos en DB
     let processedCount = 0;
+    let lastError = '';
     for (const raw of rawListings) {
         const processed = await processListing(raw, config.db);
         
@@ -118,6 +119,7 @@ export async function runScraperCycle(config: {
 
             if (error) {
                 console.error(`❌ Error grabando ${processed.title}:`, error);
+                lastError = error.message;
                 continue;
             }
             
@@ -131,4 +133,5 @@ export async function runScraperCycle(config: {
     }
 
     console.log(`🏁 Extracción finalizada. ${processedCount} registros insertados en BD.`);
+    return { count: processedCount, error: processedCount === 0 ? `Cero autos insertados. Último error BD: ${lastError}` : '' };
 }
