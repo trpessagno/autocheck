@@ -37,10 +37,11 @@ export async function runScraperCycle(config: {
         }
 
         const json = await response.json();
-        // The spec shows an array inside 'listings'
-        if (json.listings && Array.isArray(json.listings)) {
-            rawListings = json.listings;
+        // The actual API wraps the response in a { status: 'success', data: { listings: [...] } }
+        if (json.data && json.data.listings && Array.isArray(json.data.listings)) {
+            rawListings = json.data.listings;
         } else {
+             console.error('Estructura recibida:', json);
              throw new Error('Estructura inesperada devuelta por Parse.bot API.');
         }
 
