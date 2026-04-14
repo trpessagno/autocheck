@@ -8,14 +8,16 @@ export async function runScraperCycle(config: {
     telegramToken: string;
     telegramChatId: string;
     db: any; // Supabase client
+    targetUrl?: string;
 }) {
     const client = new ParseBotClient(config.parseBotKey);
     
     console.log('🚀 Inciando ciclo de scraping...');
 
     // 1. Dispatch dynamic scraper
-    const url = 'https://autos.mercadolibre.com.ar/autos-camionetas/capital-federal/particular/_OrderId_PRICE_ASC';
-    const description = 'Extract car listings including title, brand, model, year, km, price_original, currency, location, and seller_type. Return as a list of objects.';
+    const url = config.targetUrl || 'https://autos.mercadolibre.com.ar/autos-camionetas/capital-federal/particular/_OrderId_PRICE_ASC';
+    const description = 'Extract car listings including title, brand, model, year, km, price_original, currency, location, seller_type, and the main image_url of the car. Return as a list of objects.';
+
     
     const taskId = await client.dispatch(url, description);
     console.log(`✅ Task dispatched: ${taskId}. Waiting for completion...`);

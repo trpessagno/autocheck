@@ -11,6 +11,7 @@ export interface CarListing {
     currency: string;
     location: string;
     seller_type: string;
+    image_url?: string;
 }
 
 export interface ProcessedListing extends CarListing {

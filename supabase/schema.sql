@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS car_listings (
     price_usd NUMERIC NOT NULL,
     location TEXT,
     seller_type TEXT, -- Particular, Agency
+    image_url TEXT,
     is_anomaly BOOLEAN DEFAULT FALSE,
     score NUMERIC DEFAULT 0,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()

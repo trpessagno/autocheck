@@ -1,5 +1,8 @@
-import React from 'react';
-import { TrendingDown, AlertCircle, DollarSign, ExternalLink, Calendar, Gauge } from 'lucide-react';
+"use client";
+
+import React, { useEffect, useState } from 'react';
+import { TrendingDown, AlertCircle, DollarSign, ExternalLink, Calendar, Gauge, Search, Loader2 } from 'lucide-react';
+import { supabase } from '@/lib/supabase';
 
 export interface Car {
   id: string;
@@ -13,51 +16,120 @@ export interface Car {
   is_anomaly: boolean;
   score: number;
   location: string;
+  image_url?: string;
 }
 
-const mockCars: Car[] = [
-  {
-    id: '1',
-    source_url: '#',
-    title: 'Volkswagen Vento 2.0 Tsi Gli',
-    brand: 'Volkswagen',
-    model: 'Vento',
-    year: 2018,
-    km: 65000,
-    price_usd: 18500,
-    is_anomaly: true,
-    score: 9.2,
-    location: 'CABA'
-  },
-  {
-    id: '2',
-    source_url: '#',
-    title: 'Toyota Corolla 1.8 Seg Hybrid',
-    brand: 'Toyota',
-    model: 'Corolla',
-    year: 2021,
-    km: 22000,
-    price_usd: 24000,
-    is_anomaly: true,
-    score: 8.5,
-    location: 'GBA Norte'
-  }
-];
-
 export default function Dashboard() {
+  const [cars, setCars] = useState<Car[]>([]);
+  const [loadingDb, setLoadingDb] = useState(true);
+  
+  // Search & Scrape specific states
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isScraping, setIsScraping] = useState(false);
+  const [scrapeError, setScrapeError] = useState('');
+
+  // Initial Data Load
+  const fetchCars = async () => {
+    setLoadingDb(true);
+    const { data, error } = await supabase
+        .from('car_listings')
+        .select('*')
+        .order('score', { ascending: false })
+        .limit(30);
+    
+    if (data) {
+        setCars(data);
+    } else {
+        console.error("Supabase fetch error:", error);
+    }
+    setLoadingDb(false);
+  };
+
+  useEffect(() => {
+    fetchCars();
+    
+    // Optional: Set up real-time subscription
+    const channel = supabase.channel('realtime-cars')
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'car_listings' }, payload => {
+          setCars(prev => [payload.new as Car, ...prev]);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
+
+  const handleManualScrape = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!searchQuery) return;
+
+    setIsScraping(true);
+    setScrapeError('');
+    
+    // Build ML Search URL based on query
+    // e.g. "Toyota SW4" -> "toyota%20sw4"
+    const parsedQuery = encodeURIComponent(searchQuery.toLowerCase().trim().replace(/ /g, '-'));
+    const dynamicUrl = `https://autos.mercadolibre.com.ar/${parsedQuery}/_OrderId_PRICE_ASC`;
+
+    try {
+        const response = await fetch('/api/scrape', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ queryUrl: dynamicUrl })
+        });
+
+        if (!response.ok) {
+            throw new Error('Fallo al ejecutar el scraper.');
+        }
+        
+        // Wait a couple seconds and refetch to make sure db triggers completed.
+        // Actually real-time listener will catch them if they are inserted!
+        setTimeout(fetchCars, 3000);
+    } catch (err: any) {
+        setScrapeError(err.message);
+    } finally {
+        setIsScraping(false);
+    }
+  };
+
+  const anomaliesCount = cars.filter(c => c.is_anomaly).length;
+
   return (
     <div className="min-h-screen bg-[#0a0a0c] text-white p-6 font-sans">
       {/* Header */}
-      <header className="max-w-7xl mx-auto mb-12 flex justify-between items-end">
+      <header className="max-w-7xl mx-auto mb-10 flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
         <div>
-          <h1 className="text-4xl font-bold gradient-text">AutoCheck Intelligence</h1>
-          <p className="text-zinc-400 mt-2">Detección de anomalías en tiempo real - Mercado Argentino</p>
+          <h1 className="text-4xl font-bold gradient-text">MVP AutoCheck</h1>
+          <p className="text-zinc-400 mt-2">Detección de "Gangas" interna</p>
         </div>
-        <div className="glass px-4 py-2 rounded-full text-sm font-medium border-blue-500/30 flex items-center gap-2">
-          <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-          Live: USD Blue $1.150
-        </div>
+        
+        {/* Scraper / Search Input */}
+        <form onSubmit={handleManualScrape} className="w-full md:w-auto relative max-w-sm">
+            <input 
+                type="text" 
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Ej. Toyota Sw4 2020..."
+                className="w-full bg-zinc-900 border border-white/10 rounded-xl py-3 pl-11 pr-32 focus:outline-none focus:border-blue-500 transition-colors"
+                disabled={isScraping}
+            />
+            <Search className="absolute left-4 top-3.5 text-zinc-500" size={18} />
+            <button 
+                type="submit" 
+                disabled={isScraping || !searchQuery}
+                className="absolute right-1 top-1 bottom-1 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-900 text-white text-sm font-semibold px-4 rounded-lg flex items-center transition-colors"
+            >
+                {isScraping ? <><Loader2 size={16} className="mr-2 animate-spin" /> Escaneando</> : 'Explorar'}
+            </button>
+        </form>
       </header>
+
+      {scrapeError && (
+        <div className="max-w-7xl mx-auto mb-8 bg-red-500/10 border border-red-500/50 text-red-400 p-4 rounded-xl flex items-center gap-2">
+            <AlertCircle size={18} /> {scrapeError}
+        </div>
+      )}
 
       <main className="max-w-7xl mx-auto space-y-8">
         {/* Stats Grid */}
@@ -67,8 +139,8 @@ export default function Dashboard() {
               <Gauge className="text-blue-400" />
             </div>
             <div>
-              <p className="text-zinc-500 text-sm">Escaneos Hoy</p>
-              <p className="text-2xl font-bold">1,248</p>
+              <p className="text-zinc-500 text-sm">Autos en Base</p>
+              <p className="text-2xl font-bold">{cars.length}</p>
             </div>
           </div>
           <div className="glass p-6 rounded-2xl border-white/5 flex items-center gap-4">
@@ -76,8 +148,8 @@ export default function Dashboard() {
               <TrendingDown className="text-emerald-400" />
             </div>
             <div>
-              <p className="text-zinc-500 text-sm">Gangas Detectadas</p>
-              <p className="text-2xl font-bold">14</p>
+              <p className="text-zinc-500 text-sm">Anomalías Detectadas</p>
+              <p className="text-2xl font-bold">{anomaliesCount}</p>
             </div>
           </div>
           <div className="glass p-6 rounded-2xl border-white/5 flex items-center gap-4">
@@ -85,73 +157,88 @@ export default function Dashboard() {
               <AlertCircle className="text-amber-400" />
             </div>
             <div>
-              <p className="text-zinc-500 text-sm">Promedio de Ahorro</p>
-              <p className="text-2xl font-bold">18.5%</p>
+              <p className="text-zinc-500 text-sm">Estado de Red</p>
+              <p className="text-lg font-medium text-emerald-400 flex items-center gap-2 mt-1">
+                 <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span> Online
+              </p>
             </div>
           </div>
         </section>
 
-        {/* Anomalies List */}
+        {/* Feed List */}
         <section>
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-2xl font-bold flex items-center gap-2">
               <AlertCircle className="text-amber-400" />
-              Oportunidades de Alto Impacto
+              Feed Relevante
             </h2>
-            <button className="text-sm text-blue-400 hover:text-blue-300">Ver todas</button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {mockCars.map((car) => (
-              <div key={car.id} className="glass p-5 rounded-2xl border-white/5 card-hover transition-all duration-300 group">
-                <div className="flex justify-between items-start mb-4">
-                  <div className="flex items-center gap-2">
-                    <span className="bg-emerald-500/20 text-emerald-400 text-xs px-2 py-1 rounded font-bold">
-                      SCORE {car.score}
-                    </span>
-                    <span className="text-zinc-500 text-xs">{car.location}</span>
-                  </div>
-                  <a href={car.source_url} className="text-zinc-500 hover:text-white transition-colors">
-                    <ExternalLink size={18} />
-                  </a>
-                </div>
+          {loadingDb ? (
+             <div className="flex justify-center py-20 text-zinc-500">
+                <Loader2 className="animate-spin" size={32} />
+             </div>
+          ) : cars.length === 0 ? (
+             <div className="text-center py-20 text-zinc-500 bg-zinc-900/50 rounded-2xl border border-white/5">
+                No hay resultados en la base de datos.
+             </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {cars.map((car) => (
+                <div key={car.id} className="glass rounded-2xl border-white/5 card-hover transition-all duration-300 group overflow-hidden flex flex-col">
+                    {/* Image Header */}
+                    <div className="h-48 bg-zinc-800 relative w-full overflow-hidden">
+                        {car.image_url ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={car.image_url} alt={car.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                        ) : (
+                            <div className="w-full h-full flex flex-col justify-center items-center text-zinc-700">
+                                <Search size={32} className="mb-2 opacity-50"/>
+                                <span className="text-xs uppercase font-bold tracking-widest opacity-50">Sin Foto</span>
+                            </div>
+                        )}
+                        <div className="absolute top-3 right-3 bg-black/60 backdrop-blur-md text-emerald-400 text-xs px-2 py-1 rounded font-bold border border-emerald-500/30">
+                            SCORE {car.score}
+                        </div>
+                    </div>
 
-                <h3 className="text-xl font-bold mb-2 group-hover:text-blue-400 transition-colors">
-                  {car.title}
-                </h3>
+                    <div className="p-5 flex flex-col flex-grow">
+                        <div className="flex justify-between items-start mb-2">
+                            <span className="text-zinc-500 text-xs uppercase tracking-wider">{car.location}</span>
+                            <a href={car.source_url} target="_blank" rel="noreferrer" className="text-zinc-400 hover:text-white transition-colors">
+                            <ExternalLink size={16} />
+                            </a>
+                        </div>
 
-                <div className="grid grid-cols-3 gap-4 mb-6">
-                  <div className="flex flex-col">
-                    <span className="text-[10px] text-zinc-500 uppercase tracking-wider">Año</span>
-                    <span className="text-sm font-medium flex items-center gap-1">
-                      <Calendar size={14} className="text-zinc-400" /> {car.year}
-                    </span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-[10px] text-zinc-500 uppercase tracking-wider">Kilómetros</span>
-                    <span className="text-sm font-medium italic italic">
-                      {car.km.toLocaleString()} km
-                    </span>
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="text-[10px] text-zinc-500 uppercase tracking-wider">Precio USD</span>
-                    <span className="text-sm font-bold text-emerald-400 flex items-center gap-1">
-                      <DollarSign size={14} /> {car.price_usd.toLocaleString()}
-                    </span>
-                  </div>
-                </div>
+                        <h3 className="flex-grow text-lg font-bold mb-4 group-hover:text-blue-400 transition-colors line-clamp-2">
+                            {car.title}
+                        </h3>
 
-                <div className="pt-4 border-t border-white/5 flex justify-between items-center">
-                  <div className="text-xs text-zinc-500">
-                    Median: <span className="text-zinc-300 font-medium">USD 21,200</span>
-                  </div>
-                  <div className="text-sm font-bold text-emerald-400">
-                    - {( ((21200 - car.price_usd) / 21200) * 100 ).toFixed(1)}% Ahorro
-                  </div>
+                        <div className="grid grid-cols-2 gap-4 mb-4">
+                            <div className="flex flex-col">
+                                <span className="text-[10px] text-zinc-500 uppercase tracking-wider">Año / KM</span>
+                                <span className="text-sm font-medium flex items-center gap-1">
+                                    <Calendar size={12} className="text-zinc-400" /> {car.year} | {car.km.toLocaleString()}
+                                </span>
+                            </div>
+                            <div className="flex flex-col items-end">
+                                <span className="text-[10px] text-zinc-500 uppercase tracking-wider">Precio USD</span>
+                                <span className="text-lg font-bold text-emerald-400 flex items-center gap-1">
+                                    <DollarSign size={16} /> {car.price_usd.toLocaleString()}
+                                </span>
+                            </div>
+                        </div>
+
+                        {car.is_anomaly && (
+                            <div className="pt-3 border-t border-white/5 text-xs font-medium text-amber-400 flex items-center gap-1">
+                                <TrendingDown size={14} /> Posible Oportunidad de Compra
+                            </div>
+                        )}
+                    </div>
                 </div>
-              </div>
-            ))}
-          </div>
+                ))}
+            </div>
+          )}
         </section>
       </main>
     </div>
