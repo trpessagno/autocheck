@@ -19,16 +19,25 @@ export interface Car {
   image_url?: string;
 }
 
+const CAR_MODELS: Record<string, string[]> = {
+    'Toyota': ['Hilux', 'Corolla', 'SW4', 'Yaris'],
+    'Volkswagen': ['Amarok', 'Golf', 'Vento', 'Polo'],
+    'Ford': ['Ranger', 'Fiesta', 'Focus', 'Maverick'],
+    'Chevrolet': ['S10', 'Cruze', 'Onix', 'Tracker']
+};
+
 export default function Dashboard() {
   const [cars, setCars] = useState<Car[]>([]);
   const [loadingDb, setLoadingDb] = useState(true);
   
-  // Search & Scrape specific states
-  const [searchQuery, setSearchQuery] = useState('');
+  // Scraper inputs
+  const [selectedBrand, setSelectedBrand] = useState('Toyota');
+  const [selectedModel, setSelectedModel] = useState('Hilux');
+  const [selectedYear, setSelectedYear] = useState('2020');
+  
   const [isScraping, setIsScraping] = useState(false);
   const [scrapeError, setScrapeError] = useState('');
 
-  // Initial Data Load
   const fetchCars = async () => {
     setLoadingDb(true);
     const { data, error } = await supabase
@@ -62,30 +71,27 @@ export default function Dashboard() {
 
   const handleManualScrape = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!searchQuery) return;
-
     setIsScraping(true);
     setScrapeError('');
     
-    // Build ML Search URL based on query
-    // e.g. "Toyota SW4" -> "toyota%20sw4"
-    const parsedQuery = encodeURIComponent(searchQuery.toLowerCase().trim().replace(/ /g, '-'));
-    const dynamicUrl = `https://autos.mercadolibre.com.ar/${parsedQuery}/_OrderId_PRICE_ASC`;
-
+    // We send structured data instead of just the URL so the backend can build the mock
     try {
         const response = await fetch('/api/scrape', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ queryUrl: dynamicUrl })
+            body: JSON.stringify({ 
+                brand: selectedBrand,
+                model: selectedModel,
+                year: selectedYear
+            })
         });
 
         if (!response.ok) {
-            throw new Error('Fallo al ejecutar el scraper.');
+            const errorData = await response.json().catch(() => null);
+            throw new Error(errorData?.error || `Error HTTP: ${response.status}`);
         }
         
-        // Wait a couple seconds and refetch to make sure db triggers completed.
-        // Actually real-time listener will catch them if they are inserted!
-        setTimeout(fetchCars, 3000);
+        setTimeout(fetchCars, 1000);
     } catch (err: any) {
         setScrapeError(err.message);
     } finally {
@@ -98,29 +104,59 @@ export default function Dashboard() {
   return (
     <div className="min-h-screen bg-[#0a0a0c] text-white p-6 font-sans">
       {/* Header */}
-      <header className="max-w-7xl mx-auto mb-10 flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
+      <header className="max-w-7xl mx-auto mb-10 flex flex-col justify-between items-start gap-6 border-b border-white/10 pb-8">
         <div>
           <h1 className="text-4xl font-bold gradient-text">MVP AutoCheck</h1>
           <p className="text-zinc-400 mt-2">Detección de "Gangas" interna</p>
         </div>
         
-        {/* Scraper / Search Input */}
-        <form onSubmit={handleManualScrape} className="w-full md:w-auto relative max-w-sm">
-            <input 
-                type="text" 
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Ej. Toyota Sw4 2020..."
-                className="w-full bg-zinc-900 border border-white/10 rounded-xl py-3 pl-11 pr-32 focus:outline-none focus:border-blue-500 transition-colors"
-                disabled={isScraping}
-            />
-            <Search className="absolute left-4 top-3.5 text-zinc-500" size={18} />
+        {/* Scraper Form Filters */}
+        <form onSubmit={handleManualScrape} className="w-full bg-zinc-900/50 p-4 border border-white/5 rounded-2xl flex flex-col md:flex-row gap-4 items-end">
+            <div className="flex-1 w-full flex flex-col gap-1.5">
+                <label className="text-xs uppercase tracking-wider text-zinc-500 font-bold ml-1">Marca</label>
+                <select 
+                    value={selectedBrand} 
+                    onChange={(e) => {
+                        setSelectedBrand(e.target.value);
+                        setSelectedModel(CAR_MODELS[e.target.value][0]); // reset model
+                    }}
+                    className="w-full bg-zinc-800 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:border-blue-500 transition-colors appearance-none"
+                    disabled={isScraping}
+                >
+                    {Object.keys(CAR_MODELS).map(b => <option key={b} value={b}>{b}</option>)}
+                </select>
+            </div>
+
+            <div className="flex-1 w-full flex flex-col gap-1.5">
+                <label className="text-xs uppercase tracking-wider text-zinc-500 font-bold ml-1">Modelo</label>
+                <select 
+                    value={selectedModel} 
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                    className="w-full bg-zinc-800 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:border-blue-500 transition-colors appearance-none"
+                    disabled={isScraping}
+                >
+                    {CAR_MODELS[selectedBrand].map(m => <option key={m} value={m}>{m}</option>)}
+                </select>
+            </div>
+
+            <div className="flex-1 w-full flex flex-col gap-1.5">
+                <label className="text-xs uppercase tracking-wider text-zinc-500 font-bold ml-1">Año</label>
+                <select 
+                    value={selectedYear} 
+                    onChange={(e) => setSelectedYear(e.target.value)}
+                    className="w-full bg-zinc-800 border border-white/10 rounded-xl px-4 py-3 focus:outline-none focus:border-blue-500 transition-colors appearance-none"
+                    disabled={isScraping}
+                >
+                    {[2024, 2023, 2022, 2021, 2020, 2019, 2018, 2017].map(y => <option key={y} value={y.toString()}>{y}</option>)}
+                </select>
+            </div>
+
             <button 
                 type="submit" 
-                disabled={isScraping || !searchQuery}
-                className="absolute right-1 top-1 bottom-1 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-900 text-white text-sm font-semibold px-4 rounded-lg flex items-center transition-colors"
+                disabled={isScraping}
+                className="w-full md:w-auto h-[46px] bg-blue-600 hover:bg-blue-500 disabled:bg-blue-900 text-white font-semibold px-6 rounded-xl flex items-center justify-center transition-colors"
             >
-                {isScraping ? <><Loader2 size={16} className="mr-2 animate-spin" /> Escaneando</> : 'Explorar'}
+                {isScraping ? <><Loader2 size={18} className="mr-2 animate-spin" /> Buscando...</> : 'Explorar y Analizar'}
             </button>
         </form>
       </header>

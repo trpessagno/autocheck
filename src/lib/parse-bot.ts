@@ -33,7 +33,7 @@ export class ParseBotClient {
         const response = await fetch(`${this.baseUrl}/dispatch`, {
             method: 'POST',
             headers: this.headers,
-            body: JSON.stringify({ url, description }),
+            body: JSON.stringify({ url, task: description, force_new: false }),
         });
 
         if (!response.ok) {
