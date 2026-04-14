@@ -43,24 +43,22 @@ export async function runScraperCycle(config: {
         $('.ui-search-layout__item').each((i, el) => {
             const node = $(el);
             
-            const title = node.find('h2.ui-search-item__title').text().trim();
-            const source_url = node.find('a.ui-search-link').attr('href') || node.find('a.ui-search-item__group__element').attr('href') || '';
+            const title = node.find('.poly-component__title').text().trim();
+            const source_url = node.find('a.poly-component__title').attr('href') || node.find('a').attr('href') || '';
             
-            // ML stores photos in lazy loading 'data-src' sometimes, or 'src' inside 'img'
-            const imgEl = node.find('img');
+            const imgEl = node.find('img.poly-component__picture');
             const image_url = imgEl.attr('data-src') || imgEl.attr('src') || '';
             
             const rawPrice = node.find('.andes-money-amount__fraction').first().text().replace(/\./g, '').trim();
             const price_original = parseInt(rawPrice) || 0;
             
             const currencySymbol = node.find('.andes-money-amount__currency-symbol').first().text().trim();
-            const currency = currencySymbol === 'U$S' ? 'USD' : 'ARS';
+            const currency = currencySymbol.includes('U$S') || currencySymbol.includes('US$') ? 'USD' : 'ARS';
             
-            const location = node.find('.ui-search-item__location').text().trim() || 'Desconocido';
-            const seller_type = node.find('.ui-search-official-store-label').length > 0 ? 'Agencia' : 'Particular';
+            const location = node.find('.poly-component__location').text().trim() || 'Desconocido';
+            const seller_type = node.find('.poly-component__official-store').length > 0 ? 'Agencia' : 'Particular';
 
-            // Attributes are usually 2 spans: "2018", "65.000 Km"
-            const attrs = node.find('.ui-search-card-attributes__attribute').map((_, e) => $(e).text().trim()).get();
+            const attrs = node.find('.poly-attributes_list__item').map((_, e) => $(e).text().trim()).get();
             let parsedYear = parseInt(year);
             let km = 0;
             
