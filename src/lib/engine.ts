@@ -1,101 +1,136 @@
+import * as cheerio from 'cheerio';
 import { processListing, CarListing } from '../../supabase/functions/process-listing/logic';
 import { sendTelegramAlert } from './telegram';
 
 export async function runScraperCycle(config: {
-    parseBotKey: string;
+    parseBotKey: string; // Deprecated now, but kept in config to not break API Route
     telegramToken: string;
     telegramChatId: string;
     db: any; // Supabase client
     targetQuery?: { brand: string, model: string, year: string };
 }) {
-    console.log('🚀 Iniciando ciclo de scraping ONLINE con la API pre-compilada de Parse.bot...');
+    console.log('🚀 Iniciando ciclo de scraping nativo (Cheerio) en MercadoLibre...');
 
     const brand = config.targetQuery?.brand || 'Toyota';
     const model = config.targetQuery?.model || 'Hilux';
     const year = config.targetQuery?.year || '2020';
 
-    // Format query correctly: e.g. "toyota-hilux-2020"
-    const parsedQuery = `${brand}-${model}-${year}`.toLowerCase().replace(/\s+/g, '-');
-    const parseBotUrl = `https://api.parse.bot/scraper/b64d50dd-1159-4ad9-8221-3717ff8bb42d/search_cars?query=${parsedQuery}&limit=12`;
+    // Format ML Query
+    // Example: "toyota-hilux-2020"
+    const parsedQuery = encodeURIComponent(`${brand} ${model} ${year}`.toLowerCase().trim().replace(/\s+/g, '-'));
+    const url = `https://autos.mercadolibre.com.ar/${parsedQuery}/_OrderId_PRICE_ASC`;
     
-    console.log(`🌐 Extrayendo datos de: ${parseBotUrl}`);
+    console.log(`🌐 Scrapeando URL: ${url}`);
     
-    let rawListings: any[] = [];
+    let rawListings: CarListing[] = [];
     
     try {
-        const response = await fetch(parseBotUrl, {
-            method: 'GET',
+        const response = await fetch(url, {
             headers: {
-                'X-API-Key': config.parseBotKey,
-                'Content-Type': 'application/json'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+                'Accept-Language': 'es-AR,es;q=0.9,en-US;q=0.8,en;q=0.7'
             }
         });
 
         if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`Error de Parse.bot HTTP ${response.status}: ${errorText}`);
+            throw new Error(`Fallo descargando MercadoLibre [HTTP ${response.status}]`);
         }
 
-        const json = await response.json();
-        // The actual API wraps the response in a { status: 'success', data: { listings: [...] } }
-        if (json.data && json.data.listings && Array.isArray(json.data.listings)) {
-            rawListings = json.data.listings;
-        } else {
-             console.error('Estructura recibida:', json);
-             throw new Error('Estructura inesperada devuelta por Parse.bot API.');
-        }
+        const html = await response.text();
+        const $ = cheerio.load(html);
 
-    } catch (parseBotError) {
-        console.error('❌ Parse.bot falló durante la ejecución:', parseBotError);
-        throw parseBotError; // rethrow so frontend UI shows the alert
+        $('.ui-search-layout__item').each((i, el) => {
+            const node = $(el);
+            
+            const title = node.find('h2.ui-search-item__title').text().trim();
+            const source_url = node.find('a.ui-search-link').attr('href') || node.find('a.ui-search-item__group__element').attr('href') || '';
+            
+            // ML stores photos in lazy loading 'data-src' sometimes, or 'src' inside 'img'
+            const imgEl = node.find('img');
+            const image_url = imgEl.attr('data-src') || imgEl.attr('src') || '';
+            
+            const rawPrice = node.find('.andes-money-amount__fraction').first().text().replace(/\./g, '').trim();
+            const price_original = parseInt(rawPrice) || 0;
+            
+            const currencySymbol = node.find('.andes-money-amount__currency-symbol').first().text().trim();
+            const currency = currencySymbol === 'U$S' ? 'USD' : 'ARS';
+            
+            const location = node.find('.ui-search-item__location').text().trim() || 'Desconocido';
+            const seller_type = node.find('.ui-search-official-store-label').length > 0 ? 'Agencia' : 'Particular';
+
+            // Attributes are usually 2 spans: "2018", "65.000 Km"
+            const attrs = node.find('.ui-search-card-attributes__attribute').map((_, e) => $(e).text().trim()).get();
+            let parsedYear = parseInt(year);
+            let km = 0;
+            
+            if (attrs.length > 0) {
+                // Try grabbing year from first attribute if its length is 4 (e.g. 2018)
+                const possibleYear = parseInt(attrs[0]);
+                if (!isNaN(possibleYear) && possibleYear > 1900 && possibleYear <= new Date().getFullYear()+1) {
+                    parsedYear = possibleYear;
+                }
+                
+                // Km is usually the second attr, looking like "120.000 Km"
+                const possibleKmStr = attrs.length > 1 ? attrs[1] : attrs[0];
+                const possibleKm = parseInt(possibleKmStr.replace(/\./g, ''));
+                if (!isNaN(possibleKm)) {
+                    km = possibleKm;
+                }
+            }
+
+            if (title && price_original > 0 && source_url) {
+                rawListings.push({
+                    title,
+                    source_url,
+                    image_url,
+                    price_original,
+                    currency,
+                    brand,
+                    model,
+                    year: parsedYear,
+                    km,
+                    location,
+                    seller_type
+                });
+            }
+        });
+
+    } catch (scrapeError) {
+        console.error('❌ Fallo interno de extracción Cheerio:', scrapeError);
+        throw scrapeError; 
     }
 
     if (!rawListings || rawListings.length === 0) {
-        console.log('⚠️ Parse.bot no extrajo resultados.');
+        console.log('⚠️ El scraper no encontró autos. Quizás un error de parseo o una búsqueda vacía.');
         return;
     }
 
-    console.log(`📦 "Extracted" ${rawListings.length} listings from Parse API. Processing...`);
+    console.log(`📦 "Extracted" ${rawListings.length} listings nativamente. Procesando anomalías...`);
 
-    // 4. Process each listing
+    // Procesamos y guardamos en DB
+    let processedCount = 0;
     for (const raw of rawListings) {
-        
-        // We map `url` from parse output to `source_url` format, and pass it to algorithm
-        const formattedListing: CarListing = {
-             source_url: raw.url || raw.source_url, // fallback
-             title: raw.title,
-             brand: raw.brand,
-             model: raw.model,
-             year: raw.year,
-             km: raw.km,
-             price_original: raw.price_original,
-             currency: raw.currency,
-             location: raw.location,
-             seller_type: raw.seller_type,
-             image_url: raw.image_url
-        };
-
-        const processed = await processListing(formattedListing, config.db);
+        const processed = await processListing(raw, config.db);
         
         if (processed) {
-            // Save to DB
             const { error } = await config.db
                 .from('car_listings')
                 .upsert(processed, { onConflict: 'source_url' });
 
             if (error) {
-                console.error(`❌ Error saving ${processed.title}:`, error);
-                // continue, don't crash loop
+                console.error(`❌ Error grabando ${processed.title}:`, error);
                 continue;
             }
+            
+            processedCount++;
 
-            // 5. Telegram Alert
             if (processed.is_anomaly && processed.score > 8) {
-                console.log(`🔥 Gang detectada! Enviando alerta para ${processed.title}`);
+                console.log(`🔥 Oportunidad (Score ${processed.score}) enviando a Telegram!`);
                 await sendTelegramAlert(config.telegramToken, config.telegramChatId, processed);
             }
         }
     }
 
-    console.log('🏁 Ciclo de extracción ONLINE completado.');
+    console.log(`🏁 Extracción finalizada. ${processedCount} registros insertados en BD.`);
 }
