@@ -126,8 +126,8 @@ export async function runScraperCycle(config: {
             processedCount++;
 
             if (processed.is_anomaly && processed.score > 8) {
-                console.log(`🔥 Oportunidad (Score ${processed.score}) enviando a Telegram!`);
-                await sendTelegramAlert(config.telegramToken, config.telegramChatId, processed);
+                console.log(`🔥 Oportunidad (Score ${processed.score}) encontrada, pero Telegram está deshabilitado temporalmente.`);
+                // await sendTelegramAlert(config.telegramToken, config.telegramChatId, processed);
             }
         }
     }
